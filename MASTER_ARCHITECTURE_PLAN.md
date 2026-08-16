@@ -70,20 +70,21 @@ Całą paletę operacji myślowych sprowadzamy do 8 niematerialnych prymitywów 
 ---
 
 ## IV. Filar 3: Warstwa Percepcji i Refleksji Globalnej (GCL)
-
+ 
 Standardowe Self-Attention porównuje każdy token z każdym $O(n^2)$. **Global Context Layer (GCL)** zmienia ten paradygmat:
-1. **Widzenie całości (Las $\rightarrow$ Drzewa):** Najpierw wylicza abstrakcyjny szkic globalny sekwencji (`Schema`).
-2. **Refleksja (`SchemaReflector`):** Powrót do szczegółowych tokenów pod wpływem wyliczonego szkicu globalnego.
-3. **Bramkowanie (`AdaptiveGate`):** Model sam decyduje w zakresie $[0, 1]$, jak bardzo polegać na schemacie globalnym.
+1. **Widzenie całości (Las $\rightarrow$ Drzewa):** Najpierw wylicza abstrakcyjny szkic globalny sekwencji (`Schema`). Obsługuje maskowanie paddingu (`attention_mask`) oraz tryb przyczynowy (`causal_mode` przez uśrednianie kumulatywne) eliminujący wyciek przyszłych tokenów.
+2. **Pamięć Robocza (`SchemaMemory`):** Utrzymuje stan i aktualizuje schemat w pętli autoregresyjnej (EMA) podczas generacji token po tokenie ($L=1$).
+3. **Refleksja (`SchemaReflector`):** Powrót do szczegółowych tokenów pod wpływem wyliczonego szkicu globalnego.
+4. **Bramkowanie (`AdaptiveGate`):** Model sam decyduje w zakresie $[0, 1]$, jak bardzo polegać na schemacie globalnym.
 
 ---
 
 ## V. Filar 4: Cykliczny Silnik Rezonansowy (PisanoNet / RT-1)
 
 Zamiast sztucznych embeddingów pozycyjnych (RoPE/ALiBi), CUE wykorzystuje **Zegar Fibonacciego modulo $n$ ($\pi(n)=24$)**:
-- **Wielomodułowość Rezonansowa:** 4 mikro-sieci o strukturze grafów zupełnych $K_6, K_{12}, K_{18}, K_{24}$.
+- **Wielomodułowość Rezonansowa:** 4 mikro-sieci o topologii grafów zupełnych $K_6, K_{12}, K_{18}, K_{24}$ z wyuczalnymi, symetrycznymi wagami połączeń synaptycznych (`raw_adj`) i propagacją grafową (`nodes @ adj`).
 - **Pojemność Kombinatoryczna:** Sam graf $K_{24}$ mieści $\approx 7,35 \times 10^{22}$ cykli.
-- **Dynamiczna Konwergencja ($T \le 7$):** Pętla inter-synchronizacji fazowej osiąga stan zbieżny w maksymalnie 7 taktach zegara.
+- **Dynamiczna Konwergencja ($T \le 7$):** Pętla inter-synchronizacji fazowej osiąga stan zbieżny w maksymalnie 7 taktach zegara z mechanizmem względnego wczesnego wyjścia (`relative delta norm`).
 
 ---
 

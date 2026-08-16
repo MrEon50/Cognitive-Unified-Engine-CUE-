@@ -31,18 +31,19 @@ W świecie AI:
 
 ## 📊 Wyniki Eksperymentu Trenującego (`demo_unified_engine.py`)
 
-Trening na CPU (14.97 sekundy, 79,779 parametrów):
+Trening na CPU (94,483 parametrów z pełnymi macierzami grafów zupełnych $K_n$):
 
 | Epoka | Total Loss | Task Loss | Phase Loss | Wskaźnik $\Omega_{\text{IR}}$ | Śr. Iteracji ($T \leq 7$) | Celność (Accuracy) |
 |:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| 1 | 3.5382 | 3.5000 | 0.0029 | 0.2646 | **7.00** | 4.14% |
-| 10 | 1.8750 | 1.8349 | 0.0352 | 0.2737 | **7.00** | 37.66% |
-| 20 | 1.1553 | 1.1153 | 0.0445 | 0.2811 | **7.00** | 59.91% |
-| **30** | **0.8945** | **0.8546** | **0.0464** | **0.2832** | **7.00** | **65.60%** |
+| 1 | 3.5297 | 3.4976 | 0.0015 | 0.4536 | **7.00** | 4.19% |
+| 10 | 1.9912 | 1.9594 | 0.0623 | 0.5065 | **7.00** | 35.91% |
+| 20 | 1.2678 | 1.2418 | 0.0668 | 0.5282 | **7.00** | 55.60% |
+| **30** | **0.9346** | **0.9095** | **0.0658** | **0.5443** | **7.00** | **63.82%** |
 
 ### ✅ Dowiedzione właściwości:
 - **Sito Liczby 24 ($p^2 - 1 = 24n$):** 100% testów dla liczb pierwszych $\ge 5$ zakończonych wynikiem `VALID ✓`.
-- **Wzrost celności:** z 4.14% do **65.60%** (spadek błędu z 3.53 do **0.89**).
+- **Wzrost celności:** z 4.19% do **63.82%** (spadek błędu z 3.53 do **0.93**).
+- **Maksymalizacja $\Omega_{\text{IR}}$:** dynamiczny wzrost sprawności poznawczej z 0.45 do **0.54** dzięki aktywnemu uczeniu gradientowemu.
 
 ---
 
@@ -103,15 +104,27 @@ class LLMWithCUECore(nn.Module):
 - **[gcl_resonant_layer.py](file:///C:/Users/Endorfinka/Desktop/ZBIERACZ%20KODU/Cykliczne-mikro-sieci/CUE/gcl_resonant_layer.py)** — Warstwa GCL + Zegar Pisano $\pi(n)=24$ + mikro-sieci $K_n$ ($T \le 7$).
 - **[unified_cognitive_engine.py](file:///C:/Users/Endorfinka/Desktop/ZBIERACZ%20KODU/Cykliczne-mikro-sieci/CUE/unified_cognitive_engine.py)** — Nadrzędna klasa `UnifiedCognitiveEngine`.
 - **[example_llm_integration.py](file:///C:/Users/Endorfinka/Desktop/ZBIERACZ%20KODU/Cykliczne-mikro-sieci/CUE/example_llm_integration.py)** — Gotowy szablon wpięcia CUE jako warstwy w bloku Transformera / LLM.
+- **[test_cue_suite.py](file:///C:/Users/Endorfinka/Desktop/ZBIERACZ%20KODU/Cykliczne-mikro-sieci/CUE/test_cue_suite.py)** — Zautomatyzowany zestaw 12 testów jednostkowych i integracyjnych.
 - **[test_logical_brain_learning.py](file:///C:/Users/Endorfinka/Desktop/ZBIERACZ%20KODU/Cykliczne-mikro-sieci/CUE/test_logical_brain_learning.py)** — Skrypt testowy weryfikujący uogólnianie na nieznanych danych.
 - **[demo_unified_engine.py](file:///C:/Users/Endorfinka/Desktop/ZBIERACZ%20KODU/Cykliczne-mikro-sieci/CUE/demo_unified_engine.py)** — Uruchamialny skrypt demonstracyjny.
 
 
-## 🚀 Uruchomienie
+## 🚀 Uruchomienie i Testy
 
 ```bash
 cd CUE
+
+# 1. Uruchomienie pełnego pakietu testów jednostkowych (12/12 testów)
+python test_cue_suite.py
+
+# 2. Uruchomienie demonstracji treningu silnika zjednoczonego
 python demo_unified_engine.py
+
+# 3. Uruchomienie testu indukcji logicznej i generalizacji
+python test_logical_brain_learning.py
+
+# 4. Uruchomienie przykładu integracji CUE z architekturą LLM
+python example_llm_integration.py
 ```
 
 ---
