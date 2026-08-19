@@ -1,7 +1,12 @@
 """
-GCL & Resonant Core Integration Module (PyTorch).
-Fuses Global Context Layer (Schema / Global Picture + AdaptiveGate + SchemaReflector + Working Memory)
-with Pisano Clock (pi(n)=24) and Complete Graph Kn Micro-Networks (6, 12, 18, 24) with T <= 7 convergence.
+GCL (Global Context Layer) v3.0 & Resonant Core Integration Module (PyTorch).
+Fuses:
+1. Attentive Salience Pooling (Multi-Head K-slot context weighting, avoiding uniform semantic dilution)
+2. Multi-Aspect Slot Schema (Semantics, Structure, Goal, Harmony)
+3. FiLM (Feature-wise Linear Modulation: (1 + tanh(gamma)) * x + beta) & Schema Reflector
+4. Adaptive Gate with negative-bias warmup (start sigmoid(-2) ~ 0.11)
+5. SchemaMemory (Working memory with EMA update for autoregressive LLM generation)
+6. Pisano Clock (pi(n)=24) & Complete Graph Kn Micro-Networks (6, 12, 18, 24) with T <= 7 convergence.
 """
 
 import math
@@ -91,45 +96,132 @@ class ResonantMicroNet(nn.Module):
         return nodes_activated, out
 
 
+class AttentiveSaliencePooler(nn.Module):
+    """
+    GCL Attentive Salience Pooler (Multi-Slot Extraction):
+    Extracts K-aspect slot representations using learned query-based attention weights.
+    Prioritizes semantically salient tokens over auxiliary/stop tokens, preventing dilution.
+    """
+    def __init__(self, d_model: int, schema_dim: int, num_slots: int = 4):
+        super().__init__()
+        self.d_model = d_model
+        self.schema_dim = schema_dim
+        self.num_slots = num_slots
+        self.slot_dim = max(16, schema_dim // num_slots)
+        
+        # Salience queries for K distinct aspects (Semantics, Structure, Goal, Harmony)
+        self.query_proj = nn.Linear(d_model, num_slots)
+        self.value_proj = nn.Linear(d_model, self.slot_dim * num_slots)
+        self.out_proj = nn.Linear(self.slot_dim * num_slots, schema_dim)
+        self.norm = nn.LayerNorm(schema_dim)
+
+    def forward(self, x: torch.Tensor, attention_mask: torch.Tensor = None, causal: bool = False):
+        """
+        x: [B, L, D]
+        attention_mask: [B, L] optional mask
+        returns:
+            schema: [B, schema_dim] (or [B, L, schema_dim] if causal)
+            salience_weights: [B, L, num_slots]
+        """
+        B, L, D = x.shape
+        logits = self.query_proj(x) / math.sqrt(D)  # [B, L, K]
+        
+        if attention_mask is not None:
+            if attention_mask.dim() == 2:
+                mask_exp = attention_mask.unsqueeze(-1)  # [B, L, 1]
+            else:
+                mask_exp = attention_mask
+            logits = logits.masked_fill(mask_exp == 0, -1e9)
+            
+        values = self.value_proj(x).view(B, L, self.num_slots, self.slot_dim)  # [B, L, K, S]
+        
+        if causal:
+            # Causal salience pooling: position i aggregates values from positions 0..i
+            causal_mask = torch.triu(torch.ones(L, L, device=x.device), diagonal=1).bool()  # [L, L]
+            logits_k = logits.permute(0, 2, 1).unsqueeze(2).expand(-1, -1, L, -1)          # [B, K, L_q, L_k]
+            logits_k = logits_k.masked_fill(causal_mask.unsqueeze(0).unsqueeze(0), -1e9)
+            attn_weights = F.softmax(logits_k, dim=-1)                                      # [B, K, L, L]
+            values_k = values.permute(0, 2, 1, 3)                                           # [B, K, L, S]
+            causal_slots = torch.matmul(attn_weights, values_k)                             # [B, K, L, S]
+            causal_flat = causal_slots.permute(0, 2, 1, 3).reshape(B, L, self.num_slots * self.slot_dim)
+            schema = self.norm(self.out_proj(causal_flat))                                  # [B, L, schema_dim]
+            salience_weights = F.softmax(logits, dim=1)
+            return schema, salience_weights
+        else:
+            # Global attentive pooling over L
+            salience_weights = F.softmax(logits, dim=1)                                     # [B, L, K]
+            slots = torch.einsum('blk,blks->bks', salience_weights, values)                 # [B, K, S]
+            slots_flat = slots.reshape(B, self.num_slots * self.slot_dim)
+            schema = self.norm(self.out_proj(slots_flat))                                  # [B, schema_dim]
+            return schema, salience_weights
+
+
+class FiLMModulator(nn.Module):
+    """
+    Feature-wise Linear Modulation (FiLM) and Schema Reflector:
+    Modulates token representations: y = (1.0 + tanh(gamma(S))) * x + beta(S)
+    Enables selective enhancement of contextual features and attenuation of irrelevant noise.
+    """
+    def __init__(self, d_model: int, schema_dim: int):
+        super().__init__()
+        self.d_model = d_model
+        self.schema_dim = schema_dim
+        
+        self.film_gen = nn.Sequential(
+            nn.Linear(schema_dim, d_model * 2),
+            nn.GELU(),
+            nn.Linear(d_model * 2, d_model * 2)
+        )
+        
+        self.refine = nn.Sequential(
+            nn.Linear(d_model, d_model),
+            nn.GELU(),
+            nn.Linear(d_model, d_model)
+        )
+        self.norm = nn.LayerNorm(d_model)
+
+    def forward(self, x: torch.Tensor, schema: torch.Tensor):
+        """
+        x: [B, L, d_model]
+        schema: [B, schema_dim] or [B, L, schema_dim]
+        returns:
+            refined_x: [B, L, d_model]
+            schema_emb: [B, L, d_model]
+        """
+        if schema.dim() == 2:
+            film_params = self.film_gen(schema).unsqueeze(1)  # [B, 1, 2 * d_model]
+        else:
+            film_params = self.film_gen(schema)               # [B, L, 2 * d_model]
+            
+        gamma, beta = film_params.chunk(2, dim=-1)
+        # Bounded scale modulation: 1.0 + tanh(gamma) in (0, 2)
+        scale = 1.0 + torch.tanh(gamma)
+        modulated = scale * x + beta
+        refined = self.refine(self.norm(modulated))
+        schema_emb = beta.expand_as(x) if schema.dim() == 2 else beta
+        return refined, schema_emb
+
+
 class AdaptiveGate(nn.Module):
-    """Adaptive Gate mechanism from GCL (0 to 1 scaling)."""
-    def __init__(self, d_model: int):
+    """
+    Adaptive Gate mechanism with negative-bias warm-up initialization.
+    Starts with gate ≈ 0.119 (sigmoid(-2.0)) to preserve pristine base representations
+    and gradually opens up to integrate schema as training matures.
+    """
+    def __init__(self, d_model: int, init_bias: float = -2.0):
         super().__init__()
         self.gate_linear = nn.Linear(d_model * 2, 1)
+        nn.init.xavier_uniform_(self.gate_linear.weight, gain=0.1)
+        nn.init.constant_(self.gate_linear.bias, init_bias)
 
     def forward(self, x: torch.Tensor, schema_expanded: torch.Tensor) -> torch.Tensor:
         concat = torch.cat([x, schema_expanded], dim=-1)
         return torch.sigmoid(self.gate_linear(concat))
 
 
-class SchemaReflector(nn.Module):
-    """GCL Schema Reflector - transforms token details under global schema influence."""
-    def __init__(self, d_model: int, schema_dim: int):
-        super().__init__()
-        self.proj_schema = nn.Linear(schema_dim, d_model)
-        self.reflect = nn.Sequential(
-            nn.Linear(d_model, d_model),
-            nn.GELU(),
-            nn.Linear(d_model, d_model)
-        )
-
-    def forward(self, x: torch.Tensor, schema: torch.Tensor):
-        """
-        x: [B, L, d_model]
-        schema: [B, schema_dim] (or [B, L, schema_dim] for causal mode)
-        """
-        if schema.dim() == 2:
-            schema_emb = self.proj_schema(schema).unsqueeze(1).expand(-1, x.shape[1], -1)
-        else:
-            schema_emb = self.proj_schema(schema)  # [B, L, d_model]
-            
-        reflected = self.reflect(x + schema_emb)
-        return reflected, schema_emb
-
-
 class SchemaMemory(nn.Module):
     """
-    GCL Working Memory - maintains and updates running global schema
+    GCL Working Memory - maintains and updates running multi-aspect global schema
     during autoregressive generation (token-by-token) with learnable EMA.
     """
     def __init__(self, schema_dim: int, ema_decay: float = 0.95):
@@ -163,25 +255,27 @@ class SchemaMemory(nn.Module):
 
 class GCLResonantLayer(nn.Module):
     """
-    Fused GCL & Resonant Core Layer.
+    Fused GCL v3.0 & Resonant Core Layer.
     Pipeline:
-      1. Global Schema Pooling (Global Context / Las -> Drzewa) with mask & causal support
-      2. Schema Reflector & Adaptive Gate
-      3. Pisano Clock Injection (pi=24)
-      4. Parallel Complete Graph Kn Micro-Networks (T <= 7 convergence loop)
+      1. Attentive Salience Pooling (Multi-Head K-Slot Global Context extraction)
+      2. FiLM Modulation & Schema Reflector (Scale & Shift + Nonlinear Refinement)
+      3. Adaptive Gate with negative-bias warm-up
+      4. Pisano Clock Injection (pi=24)
+      5. Parallel Complete Graph Kn Micro-Networks (T <= 7 dynamic convergence loop)
     """
-    def __init__(self, d_model: int, schema_dim: int = 128, max_iter: int = 7, tolerance: float = 1e-3, causal: bool = False):
+    def __init__(self, d_model: int, schema_dim: int = 128, num_slots: int = 4, max_iter: int = 7, tolerance: float = 1e-3, causal: bool = False):
         super().__init__()
         self.d_model = d_model
         self.schema_dim = schema_dim
+        self.num_slots = num_slots
         self.max_iter = max_iter
         self.tolerance = tolerance
         self.causal = causal
         
-        # GCL components
-        self.schema_pool = nn.Linear(d_model, schema_dim)
-        self.reflector = SchemaReflector(d_model, schema_dim)
-        self.gate = AdaptiveGate(d_model)
+        # GCL v3.0 components
+        self.salience_pooler = AttentiveSaliencePooler(d_model, schema_dim, num_slots=num_slots)
+        self.film_modulator = FiLMModulator(d_model, schema_dim)
+        self.gate = AdaptiveGate(d_model, init_bias=-2.0)
         self.memory = SchemaMemory(schema_dim)
         
         # Pisano Clock
@@ -205,34 +299,21 @@ class GCLResonantLayer(nn.Module):
         use_memory: if True, uses SchemaMemory for incremental generation
         """
         B, L, D = x.shape
-        pooled_proj = self.schema_pool(x)  # [B, L, schema_dim]
         
-        # Step 1: GCL Global Schema Extraction
-        if self.causal:
-            # Causal cumulative mean: position i only sees positions 0..i
-            cumsum = torch.cumsum(pooled_proj, dim=1)
-            pos_counts = torch.arange(1, L + 1, device=x.device, dtype=pooled_proj.dtype).unsqueeze(0).unsqueeze(-1)
-            schema = cumsum / pos_counts  # [B, L, schema_dim]
-        elif attention_mask is not None:
-            # Masked pooling (prevents padding token corruption)
-            if attention_mask.dim() == 2:
-                mask_exp = attention_mask.unsqueeze(-1).float()  # [B, L, 1]
-            else:
-                mask_exp = attention_mask.float()
-            schema = torch.sum(pooled_proj * mask_exp, dim=1) / torch.clamp(torch.sum(mask_exp, dim=1), min=1.0)  # [B, schema_dim]
-        else:
-            schema = torch.mean(pooled_proj, dim=1)  # [B, schema_dim]
-            
+        # Step 1: GCL Attentive Salience Multi-Slot Pooling
+        schema, salience_weights = self.salience_pooler(x, attention_mask=attention_mask, causal=self.causal)
+        
         if use_memory and not self.causal:
             schema = self.memory.update(schema)
             
-        reflected_x, schema_expanded = self.reflector(x, schema)
+        # Step 2: FiLM Modulation & Reflector
+        reflected_x, schema_expanded = self.film_modulator(x, schema)
         gate_val = self.gate(x, schema_expanded)
         
-        # Enhanced GCL Representation
+        # Enhanced GCL Representation with Residual
         gcl_x = x + gate_val * reflected_x
         
-        # Step 2: Pisano Clock Injection
+        # Step 3: Pisano Clock Injection
         clock_emb = self.clock(B, L, device=x.device)
         state = self.norm(gcl_x + clock_emb)
         
@@ -241,7 +322,7 @@ class GCLResonantLayer(nn.Module):
         all_phase_states = []
         diff_val = 0.0
         
-        # Step 3: Resonant Micro-Network Convergence Loop (Complete Graph Kn, T <= 7)
+        # Step 4: Resonant Micro-Network Convergence Loop (Complete Graph Kn, T <= 7)
         for t in range(self.max_iter):
             iters_taken += 1
             net_outputs = []
@@ -277,6 +358,7 @@ class GCLResonantLayer(nn.Module):
                 "iters": iters_taken,
                 "phases": all_phase_states,
                 "schema": schema,
+                "salience_weights": salience_weights,
                 "gate": gate_val,
                 "diff": diff_val
             }

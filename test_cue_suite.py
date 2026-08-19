@@ -1,12 +1,13 @@
 r"""
-Comprehensive Unit & Integration Test Suite for CUE (Cognitive Unified Engine).
+Comprehensive Unit & Integration Test Suite for CUE (Cognitive Unified Engine) & GCL v3.0.
 Validates:
 1. Prime Sieve 24 ($p^2 - 1 = 24n$) and active prime slots.
 2. Cognitive Palette & Axiom of Recursion ($R(A, B) \rightarrow O'$).
 3. HOX & IR Validator and Differentiable $\Omega_{\text{IR}}$ Calculator.
-4. GCL & Complete Graph $K_n$ Resonant Layer ($T \le 7$, Causal safety, Masking).
-5. Full End-to-End Gradient Flow across all CUE modules.
-6. CUE Transformer & LLM Integration.
+4. GCL v3.0: Attentive Salience Pooling, Multi-Slot Schema, FiLM Modulation & Negative-Bias Gate.
+5. Complete Graph $K_n$ Resonant Layer ($T \le 7$, Causal safety, Masking).
+6. Full End-to-End Gradient Flow across all CUE modules.
+7. CUE Transformer & LLM Integration.
 """
 
 import math
@@ -17,7 +18,7 @@ import torch.nn.functional as F
 
 from cognitive_primitives import CognitivePalette, CognitiveObject, CognitiveRelation, CognitiveRelationLayer
 from hox_ir_validator import PrimeSieve24, OmegaIRCalculator, IRValidator
-from gcl_resonant_layer import PisanoClock, ResonantMicroNet, SchemaMemory, GCLResonantLayer
+from gcl_resonant_layer import PisanoClock, ResonantMicroNet, AttentiveSaliencePooler, FiLMModulator, AdaptiveGate, SchemaMemory, GCLResonantLayer
 from unified_cognitive_engine import UnifiedCognitiveEngine, compute_cue_hybrid_loss
 from example_llm_integration import CUETransformerBlock, CUELanguageModel
 
@@ -91,6 +92,46 @@ class TestHOXIRValidator(unittest.TestCase):
         self.assertGreater(phi_iit.grad.item(), 0.0)
 
 
+class TestGCLv3Components(unittest.TestCase):
+    def setUp(self):
+        self.d_model = 64
+        self.schema_dim = 32
+
+    def test_attentive_salience_pooler(self):
+        pooler = AttentiveSaliencePooler(self.d_model, self.schema_dim, num_slots=4)
+        x = torch.randn(2, 24, self.d_model)
+        mask = torch.ones(2, 24)
+        mask[:, 20:] = 0.0  # Last 4 tokens padded
+        
+        schema, salience_weights = pooler(x, attention_mask=mask)
+        self.assertEqual(schema.shape, (2, self.schema_dim))
+        self.assertEqual(salience_weights.shape, (2, 24, 4))
+        # Salience weights should sum to 1.0 along sequence length for unmasked positions
+        weight_sum = salience_weights[:, :20, :].sum(dim=1)
+        self.assertTrue(torch.allclose(weight_sum, torch.ones_like(weight_sum), atol=1e-3))
+        # Padded positions should have ~0.0 weight
+        self.assertTrue((salience_weights[:, 20:, :] < 1e-4).all())
+
+    def test_film_modulator(self):
+        modulator = FiLMModulator(self.d_model, self.schema_dim)
+        x = torch.randn(2, 24, self.d_model)
+        schema = torch.randn(2, self.schema_dim)
+        
+        refined, schema_emb = modulator(x, schema)
+        self.assertEqual(refined.shape, (2, 24, self.d_model))
+        self.assertFalse(torch.isnan(refined).any())
+
+    def test_negative_bias_gate_init(self):
+        gate = AdaptiveGate(self.d_model, init_bias=-2.0)
+        x = torch.randn(2, 24, self.d_model)
+        schema_emb = torch.randn(2, 24, self.d_model)
+        
+        # Test initial gate values on zero-centered inputs
+        gate_vals = gate(torch.zeros_like(x), torch.zeros_like(schema_emb))
+        expected_init = 1.0 / (1.0 + math.exp(2.0))  # ~0.1192
+        self.assertAlmostEqual(gate_vals.mean().item(), expected_init, places=2)
+
+
 class TestGCLResonantLayer(unittest.TestCase):
     def setUp(self):
         self.d_model = 64
@@ -111,6 +152,7 @@ class TestGCLResonantLayer(unittest.TestCase):
         self.assertEqual(out.shape, (2, 24, self.d_model))
         self.assertLessEqual(details["iters"], 7)
         self.assertEqual(len(details["phases"]), details["iters"])
+        self.assertIn("salience_weights", details)
 
     def test_causal_no_future_leak(self):
         causal_layer = GCLResonantLayer(self.d_model, schema_dim=32, max_iter=3, causal=True)
@@ -164,7 +206,9 @@ class TestUnifiedCognitiveEngine(unittest.TestCase):
         self.assertIsNotNone(model.palette.causal_weight.weight.grad, "palette causal_weight grad missing")
         self.assertIsNotNone(model.palette.relation_synth.synth[0].weight.grad, "palette relation_synth grad missing")
         self.assertIsNotNone(model.layers[0].micro_nets[0].raw_adj.grad, "micro_net raw_adj grad missing")
-        self.assertIsNotNone(model.layers[0].schema_pool.weight.grad, "schema_pool grad missing")
+        self.assertIsNotNone(model.layers[0].salience_pooler.query_proj.weight.grad, "salience_pooler query_proj grad missing")
+        self.assertIsNotNone(model.layers[0].salience_pooler.value_proj.weight.grad, "salience_pooler value_proj grad missing")
+        self.assertIsNotNone(model.layers[0].film_modulator.film_gen[0].weight.grad, "film_modulator grad missing")
         self.assertIsNotNone(model.layers[0].fusion.weight.grad, "fusion grad missing")
         self.assertIsNotNone(model.lm_head.weight.grad, "lm_head grad missing")
 
@@ -179,6 +223,7 @@ class TestLLMIntegration(unittest.TestCase):
         self.assertEqual(len(details), 2)
         self.assertIn("iters", details[0])
         self.assertIn("gate", details[0])
+        self.assertIn("salience_weights", details[0])
 
 
 if __name__ == "__main__":

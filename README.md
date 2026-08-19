@@ -31,19 +31,20 @@ W świecie AI:
 
 ## 📊 Wyniki Eksperymentu Trenującego (`demo_unified_engine.py`)
 
-Trening na CPU (94,483 parametrów z pełnymi macierzami grafów zupełnych $K_n$):
+Trening na CPU (140,955 parametrów z GCL v3.0 Attentive Salience Pooling + FiLM + macierzami $K_n$):
 
 | Epoka | Total Loss | Task Loss | Phase Loss | Wskaźnik $\Omega_{\text{IR}}$ | Śr. Iteracji ($T \leq 7$) | Celność (Accuracy) |
 |:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| 1 | 3.5297 | 3.4976 | 0.0015 | 0.4536 | **7.00** | 4.19% |
-| 10 | 1.9912 | 1.9594 | 0.0623 | 0.5065 | **7.00** | 35.91% |
-| 20 | 1.2678 | 1.2418 | 0.0668 | 0.5282 | **7.00** | 55.60% |
-| **30** | **0.9346** | **0.9095** | **0.0658** | **0.5443** | **7.00** | **63.82%** |
+| 1 | 3.5217 | 3.4905 | 0.0008 | 0.4658 | **7.00** | 3.89% |
+| 10 | 1.9983 | 1.9674 | 0.0551 | 0.5064 | **7.00** | 33.36% |
+| 20 | 1.2845 | 1.2590 | 0.0654 | 0.5332 | **7.00** | 54.70% |
+| **30** | **0.9409** | **0.9162** | **0.0628** | **0.5463** | **7.00** | **64.11%** |
 
 ### ✅ Dowiedzione właściwości:
 - **Sito Liczby 24 ($p^2 - 1 = 24n$):** 100% testów dla liczb pierwszych $\ge 5$ zakończonych wynikiem `VALID ✓`.
-- **Wzrost celności:** z 4.19% do **63.82%** (spadek błędu z 3.53 do **0.93**).
-- **Maksymalizacja $\Omega_{\text{IR}}$:** dynamiczny wzrost sprawności poznawczej z 0.45 do **0.54** dzięki aktywnemu uczeniu gradientowemu.
+- **Wzrost celności uczenia:** z 3.89% do **64.11%** (w teście logicznym do **76.39%**).
+- **GCL v3.0 Multi-Slot Attentive Pooling:** eliminacja rozmycia semantycznego i precyzyjne ważenie istotności tokenów.
+- **Maksymalizacja $\Omega_{\text{IR}}$:** dynamiczny wzrost sprawności poznawczej do **0.5463** dzięki aktywnemu uczeniu gradientowemu.
 
 ---
 

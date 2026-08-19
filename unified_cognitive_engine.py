@@ -3,7 +3,7 @@ Unified Cognitive Engine (CUE) Master Model (PyTorch).
 Complete unification of:
 - HOX & IR (EICR Algebra & Differentiable Omega_IR Constant Validator)
 - Mind Alphabet (8 Cognitive Primitives O, D, E, M, V, T, C, G)
-- GCL (Global Schema, AdaptiveGate, SchemaReflector, SchemaMemory)
+- GCL v3.0 (Attentive Salience Multi-Slot Schema, FiLM Modulation, AdaptiveGate, SchemaMemory)
 - PisanoNet / RT-1 (Pisano Clock pi(n)=24, Resonant Kn Micro-Networks, T <= 7)
 """
 
@@ -22,7 +22,7 @@ class UnifiedCognitiveEngine(nn.Module):
     Master Cognitive Unified Engine (CUE).
     Unified PyTorch model compatible with LLMs as a drop-in layer or standalone cognitive engine.
     """
-    def __init__(self, vocab_size: int, d_model: int = 128, schema_dim: int = 64, n_layers: int = 2, max_iter: int = 7, causal: bool = False):
+    def __init__(self, vocab_size: int, d_model: int = 128, schema_dim: int = 64, num_slots: int = 4, n_layers: int = 2, max_iter: int = 7, causal: bool = False):
         super().__init__()
         self.vocab_size = vocab_size
         self.d_model = d_model
@@ -34,9 +34,9 @@ class UnifiedCognitiveEngine(nn.Module):
         # 2. Cognitive Primitives Palette (Mind Alphabet: O, D, E, M, V, T, C, G)
         self.palette = CognitivePalette(d_model)
         
-        # 3. GCL + Resonant Layers (Complete Graph Kn, T <= 7)
+        # 3. GCL v3.0 + Resonant Layers (Attentive Salience Pooling + FiLM + Kn Complete Graph, T <= 7)
         self.layers = nn.ModuleList([
-            GCLResonantLayer(d_model, schema_dim=schema_dim, max_iter=max_iter, causal=causal)
+            GCLResonantLayer(d_model, schema_dim=schema_dim, num_slots=num_slots, max_iter=max_iter, causal=causal)
             for _ in range(n_layers)
         ])
         
@@ -63,6 +63,7 @@ class UnifiedCognitiveEngine(nn.Module):
         all_phase_states = []
         schemas = []
         gates = []
+        salience_weights_list = []
         
         # Pass through CUE GCL-Resonant Layers
         for layer in self.layers:
@@ -72,6 +73,8 @@ class UnifiedCognitiveEngine(nn.Module):
                 all_phase_states.append(layer_details["phases"])
                 schemas.append(layer_details["schema"])
                 gates.append(layer_details["gate"])
+                if "salience_weights" in layer_details:
+                    salience_weights_list.append(layer_details["salience_weights"])
             else:
                 x = layer(x, attention_mask=attention_mask, return_details=False)
             
@@ -106,6 +109,7 @@ class UnifiedCognitiveEngine(nn.Module):
                 "all_phase_states": all_phase_states,
                 "schemas": schemas,
                 "gates": gates,
+                "salience_weights": salience_weights_list,
                 "cognitive_palette": cognitive_results,
                 "eicr_scores": eicr_scores,
                 "harmony_score": harmony_score,
